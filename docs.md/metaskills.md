@@ -1,4 +1,4 @@
-# Agent MetaSKILLs
+# Agent metaSKILLs
 
 Agent MetaSKILLs are small workflow programs for AI agents. Like regular agent
 SKILLs, they are meant to be automatically loaded on-demand when the user agent
@@ -39,7 +39,7 @@ loop explicit:
 In short: use a static skill for guidance; use a metaskill when the skill needs
 to run a small, repeatable procedure.
 
-## 2. A Tiny MetaSKILL
+## 2. A tiny metaSKILL
 
 A metaskill is a skill directory with two files:
 
@@ -111,7 +111,7 @@ The author writes a normal, small program. The host supplies `ask`, `command`,
 and `trace`. The program does not get raw filesystem, process, network, or
 environment access.
 
-## 3. Package Format
+## 3. Package format
 
 A metaskill is still a skill. It MUST live in a directory containing `SKILL.md`.
 The dynamic workflow is a program file in the same directory. The conventional
@@ -200,7 +200,7 @@ Catalog entries SHOULD stay compact:
 - test-fix: Run tests and ask the agent to fix failures. (metaskill: starlark)
 ```
 
-## 5. Activation And Execution
+## 5. Activation and execution
 
 Activation and execution are separate.
 
@@ -216,7 +216,7 @@ activate the skill instructions. They SHOULD NOT automatically execute the
 metaskill unless the user clearly asked for that behavior or the host has a
 separate documented policy.
 
-## 6. Runtime Language
+## 6. Runtime language
 
 This specification defines [Starlark](https://starlark-lang.org), a safe subset of Python, as the portable metaskill language.
 
@@ -331,7 +331,7 @@ Parameters:
 Trace calls MUST NOT consume ask or command budgets. Hosts MUST cap the number
 and size of trace entries.
 
-## 8. Budgets And Limits
+## 8. Budgets and limits
 
 A conforming host MUST enforce finite budgets. Recommended defaults:
 
@@ -350,7 +350,7 @@ The `run_metaskill` operation MAY allow callers to set `max_ask_calls` and
 and timeout before every host API call. Hosts SHOULD also interrupt or isolate
 pure script computation so large loops cannot evade wall-clock limits.
 
-## 9. Result Contract
+## 9. Result contract
 
 Metaskill execution returns a string at the host tool boundary.
 
@@ -386,7 +386,7 @@ truncate trace first and answer last. Truncation MUST be explicit in the JSON,
 for example with `answer_truncated: true` or a trace entry whose kind is
 `truncated`.
 
-## 10. Standard Tool Schema
+## 10. Standard tool schema
 
 Hosts that expose tools to a model SHOULD expose metaskill execution with this
 JSON-schema-shaped function:
@@ -429,9 +429,9 @@ If the caller passes an empty or missing `input`, the host SHOULD return a
 helpful error that includes the skill instructions so the caller can learn the
 expected keys and retry without an additional round trip.
 
-## 11. Practical Examples
+## 11. Practical examples
 
-### Run Tests And Ask For Fixes
+### Run tests and ask for fixes
 
 This metaskill runs a test command. If the command fails, it asks the host agent
 to fix the failure, then tries again.
@@ -479,7 +479,7 @@ Example input:
 }
 ```
 
-### Require A Checklist
+### Require a checklist
 
 This metaskill asks for a short checklist and retries until all required words
 appear.
@@ -535,7 +535,7 @@ Example input:
 }
 ```
 
-### Review A Diff Once
+### Review a diff once
 
 This metaskill keeps the workflow simple: get a diff through host policy, ask
 for a focused review, and return the answer.
@@ -565,7 +565,7 @@ def run(input):
     }
 ```
 
-## 12. Security Model
+## 12. Security model
 
 Metaskills are code, so they need an explicit trust model.
 
@@ -598,7 +598,7 @@ Sandbox posture:
 - Hosts SHOULD defensively copy or freeze `input`, host API return values, and
   trace data before exposing them to the script.
 
-## 13. Agent Behavior Guidelines
+## 13. Agent behavior guidelines
 
 An AI agent using a metaskill-capable host SHOULD:
 

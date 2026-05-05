@@ -96,7 +96,7 @@
 </div>
         </aside>
         <article class="docs-content">
-            <h1 id="agent-metaskills">Agent MetaSKILLs</h1>
+            <h1 id="agent-metaskills">Agent metaSKILLs</h1>
 <p>Agent MetaSKILLs are small workflow programs for AI agents. Like regular agent
 SKILLs, they are meant to be automatically loaded on-demand when the user agent
 determines they are needed.</p>
@@ -129,7 +129,7 @@ loop explicit:</p>
 </ul>
 <p>In short: use a static skill for guidance; use a metaskill when the skill needs
 to run a small, repeatable procedure.</p>
-<h2 id="2-a-tiny-metaskill">2. A Tiny MetaSKILL</h2>
+<h2 id="2-a-tiny-metaskill">2. A tiny metaSKILL</h2>
 <p>A metaskill is a skill directory with two files:</p>
 <pre><code class="language-text">skills/
   require-heading/
@@ -190,7 +190,7 @@ Input keys:
 <p>The author writes a normal, small program. The host supplies <code>ask</code>, <code>command</code>,
 and <code>trace</code>. The program does not get raw filesystem, process, network, or
 environment access.</p>
-<h2 id="3-package-format">3. Package Format</h2>
+<h2 id="3-package-format">3. Package format</h2>
 <p>A metaskill is still a skill. It MUST live in a directory containing <code>SKILL.md</code>.
 The dynamic workflow is a program file in the same directory. The conventional
 program filename is <code>SKILL.star</code>.</p>
@@ -297,7 +297,7 @@ deterministic winner according to documented precedence rules.</p>
 <p>Catalog entries SHOULD stay compact:</p>
 <pre><code class="language-text">- test-fix: Run tests and ask the agent to fix failures. (metaskill: starlark)
 </code></pre>
-<h2 id="5-activation-and-execution">5. Activation And Execution</h2>
+<h2 id="5-activation-and-execution">5. Activation and execution</h2>
 <p>Activation and execution are separate.</p>
 <p>Activation loads <code>SKILL.md</code> instructions into context. It should not execute
 code.</p>
@@ -308,7 +308,7 @@ execution through an operation named <code>run_metaskill</code>.</p>
 activate the skill instructions. They SHOULD NOT automatically execute the
 metaskill unless the user clearly asked for that behavior or the host has a
 separate documented policy.</p>
-<h2 id="6-runtime-language">6. Runtime Language</h2>
+<h2 id="6-runtime-language">6. Runtime language</h2>
 <p>This specification defines <a href="https://starlark-lang.org">Starlark</a>, a safe subset of Python, as the portable metaskill language.</p>
 <p>A metaskill program MUST define:</p>
 <pre><code class="language-python">def run(input):
@@ -463,7 +463,7 @@ implementer understand the run later.</p>
 </table>
 <p>Trace calls MUST NOT consume ask or command budgets. Hosts MUST cap the number
 and size of trace entries.</p>
-<h2 id="8-budgets-and-limits">8. Budgets And Limits</h2>
+<h2 id="8-budgets-and-limits">8. Budgets and limits</h2>
 <p>A conforming host MUST enforce finite budgets. Recommended defaults:</p>
 <table>
 <thead>
@@ -507,7 +507,7 @@ and size of trace entries.</p>
 <code>max_command_calls</code> within host-defined bounds. Hosts SHOULD check cancellation
 and timeout before every host API call. Hosts SHOULD also interrupt or isolate
 pure script computation so large loops cannot evade wall-clock limits.</p>
-<h2 id="9-result-contract">9. Result Contract</h2>
+<h2 id="9-result-contract">9. Result contract</h2>
 <p>Metaskill execution returns a string at the host tool boundary.</p>
 <p>On success, the string SHOULD contain a short completion header followed by one
 JSON object:</p>
@@ -549,7 +549,7 @@ invalid return values.</p>
 truncate trace first and answer last. Truncation MUST be explicit in the JSON,
 for example with <code>answer_truncated: true</code> or a trace entry whose kind is
 <code>truncated</code>.</p>
-<h2 id="10-standard-tool-schema">10. Standard Tool Schema</h2>
+<h2 id="10-standard-tool-schema">10. Standard tool schema</h2>
 <p>Hosts that expose tools to a model SHOULD expose metaskill execution with this
 JSON-schema-shaped function:</p>
 <pre><code class="language-json">{
@@ -586,8 +586,8 @@ the <code>name</code> property.</p>
 <p>If the caller passes an empty or missing <code>input</code>, the host SHOULD return a
 helpful error that includes the skill instructions so the caller can learn the
 expected keys and retry without an additional round trip.</p>
-<h2 id="11-practical-examples">11. Practical Examples</h2>
-<h3 id="run-tests-and-ask-for-fixes">Run Tests And Ask For Fixes</h3>
+<h2 id="11-practical-examples">11. Practical examples</h2>
+<h3 id="run-tests-and-ask-for-fixes">Run tests and ask for fixes</h3>
 <p>This metaskill runs a test command. If the command fails, it asks the host agent
 to fix the failure, then tries again.</p>
 <pre><code class="language-python">def run(input):
@@ -628,7 +628,7 @@ to fix the failure, then tries again.</p>
   &quot;test_command&quot;: [&quot;pytest&quot;, &quot;tests/test_parser.py&quot;, &quot;-q&quot;]
 }
 </code></pre>
-<h3 id="require-a-checklist">Require A Checklist</h3>
+<h3 id="require-a-checklist">Require a checklist</h3>
 <p>This metaskill asks for a short checklist and retries until all required words
 appear.</p>
 <pre><code class="language-python">def run(input):
@@ -677,7 +677,7 @@ appear.</p>
   &quot;required&quot;: [&quot;install&quot;, &quot;test&quot;, &quot;rollback&quot;]
 }
 </code></pre>
-<h3 id="review-a-diff-once">Review A Diff Once</h3>
+<h3 id="review-a-diff-once">Review a diff once</h3>
 <p>This metaskill keeps the workflow simple: get a diff through host policy, ask
 for a focused review, and return the answer.</p>
 <pre><code class="language-python">def run(input):
@@ -703,7 +703,7 @@ for a focused review, and return the answer.</p>
         &quot;answer&quot;: review[&quot;answer&quot;],
     }
 </code></pre>
-<h2 id="12-security-model">12. Security Model</h2>
+<h2 id="12-security-model">12. Security model</h2>
 <p>Metaskills are code, so they need an explicit trust model.</p>
 <p>Default policy:</p>
 <ul>
@@ -734,7 +734,7 @@ for a focused review, and return the answer.</p>
 <li>Hosts SHOULD defensively copy or freeze <code>input</code>, host API return values, and
   trace data before exposing them to the script.</li>
 </ul>
-<h2 id="13-agent-behavior-guidelines">13. Agent Behavior Guidelines</h2>
+<h2 id="13-agent-behavior-guidelines">13. Agent behavior guidelines</h2>
 <p>An AI agent using a metaskill-capable host SHOULD:</p>
 <ul>
 <li>When a metaskill applies to the user's request, call <code>run_metaskill</code> directly
