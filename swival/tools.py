@@ -3155,7 +3155,12 @@ def dispatch(name: str, args: dict, base_dir: str, **kwargs) -> str:
 
         catalog = kwargs.get("skills_catalog", {})
         read_roots = kwargs.get("skill_read_roots", [])
-        return activate_skill(args["name"], catalog, read_roots)
+        return activate_skill(
+            args["name"],
+            catalog,
+            read_roots,
+            enabled_metaskills=kwargs.get("enabled_metaskills"),
+        )
     elif name == "run_metaskill":
         from .metaskills import run_metaskill as _run_metaskill
 

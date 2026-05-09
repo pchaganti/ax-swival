@@ -2404,6 +2404,7 @@ def handle_tool_call(
     report=None,
     metaskill_loop_kwargs=None,
     cancel_flag=None,
+    enabled_metaskills=None,
 ):
     """Execute a single tool call and return (tool_msg, metadata).
 
@@ -2474,6 +2475,7 @@ def handle_tool_call(
             report=report,
             metaskill_loop_kwargs=metaskill_loop_kwargs,
             cancel_flag=cancel_flag,
+            enabled_metaskills=enabled_metaskills,
         )
     except McpShutdownError:
         result = "error: MCP server is shutting down"
@@ -5547,6 +5549,7 @@ def build_system_prompt(
     command_tool_schemas: list | None = None,
     files_mode: str = "some",
     start_dir: "Path | None" = None,
+    metaskill_names: list[str] | None = None,
 ) -> tuple[str | None, list[str]]:
     """Assemble full system prompt with instructions, date, skills, memory.
 
@@ -5624,7 +5627,9 @@ def build_system_prompt(
         if skills_catalog and not system_prompt:
             from .skills import format_skill_catalog
 
-            catalog_text = format_skill_catalog(skills_catalog)
+            catalog_text = format_skill_catalog(
+                skills_catalog, metaskill_names=metaskill_names
+            )
             if catalog_text:
                 system_content += "\n\n" + catalog_text
         if mcp_tool_info and not system_prompt:
@@ -6051,6 +6056,7 @@ def _run_main(args, report, _write_report, parser):
         command_tool_schemas=_command_tool_schemas,
         files_mode=files_mode,
         start_dir=start_dir,
+        metaskill_names=_metaskill_names,
     )
     policy: _InteractionPolicy = "interactive" if args.repl else "autonomous"
     if system_content is not None:
@@ -6108,6 +6114,7 @@ def _run_main(args, report, _write_report, parser):
         secret_shield=secret_shield,
         command_policy=command_policy,
         metaskills_policy=_metaskills_policy_val,
+        enabled_metaskills=set(_metaskill_names or []),
     )
 
     # Validate and thread llm_filter
@@ -6529,6 +6536,7 @@ def run_agent_loop(
     is_subagent: bool = False,
     goal_launch_turn: bool = False,
     metaskills_policy: str = "local",
+    enabled_metaskills: set | None = None,
 ) -> tuple[str | None, bool]:
     """Run the tool-calling loop until a final answer or max turns.
 
@@ -6610,6 +6618,7 @@ def run_agent_loop(
         "command_middleware": command_middleware,
         "tools": tools,
         "metaskills_policy": metaskills_policy,
+        "enabled_metaskills": enabled_metaskills or set(),
     }
 
     # Goal-loop bookkeeping. last_turn_was_goal_continuation tracks whether the
@@ -6710,6 +6719,7 @@ def run_agent_loop(
             report=report,
             metaskill_loop_kwargs=_metaskill_loop_kwargs,
             cancel_flag=cancel_flag,
+            enabled_metaskills=enabled_metaskills,
         )
         llm_kwargs = {
             **llm_kwargs,
@@ -6734,7 +6744,10 @@ def run_agent_loop(
                 from .skills import inject_skill_mentions
 
                 activations = inject_skill_mentions(
-                    user_text, skills_catalog, skill_read_roots
+                    user_text,
+                    skills_catalog,
+                    skill_read_roots,
+                    enabled_metaskills=enabled_metaskills,
                 )
                 if activations:
                     import uuid as _uuid
@@ -7529,6 +7542,7 @@ def run_agent_loop(
                 report=report,
                 metaskill_loop_kwargs=_metaskill_loop_kwargs,
                 cancel_flag=cancel_flag,
+                enabled_metaskills=enabled_metaskills,
             )
             messages.append(tool_msg)
 
@@ -9287,6 +9301,7 @@ def repl_loop(
     on_exit=None,
     trace_dir: str | None = None,
     metaskills_policy: str = "local",
+    enabled_metaskills: set | None = None,
 ):
     """Interactive read-eval-print loop."""
     from prompt_toolkit import PromptSession
@@ -9369,6 +9384,7 @@ def repl_loop(
         report=report,
         turn_offset=turn_offset,
         metaskills_policy=metaskills_policy,
+        enabled_metaskills=enabled_metaskills,
     )
 
     ctx = InputContext(

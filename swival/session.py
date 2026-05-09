@@ -444,6 +444,7 @@ class Session:
             provider=self.provider,
             command_tool_schemas=_command_tool_schemas,
             files_mode=self.files,
+            metaskill_names=self._metaskill_names,
         )
 
         # Clean up stale cmd_output files
@@ -540,6 +541,7 @@ class Session:
             cache=self._llm_cache,
             command_policy=self._command_policy,
             metaskills_policy=self._metaskills_policy,
+            enabled_metaskills=set(self._metaskill_names or []),
         )
         if state.get("compaction_state") is not None:
             kwargs["compaction_state"] = state["compaction_state"]

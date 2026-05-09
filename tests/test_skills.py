@@ -33,6 +33,17 @@ def _make_skill(
     return skill_dir
 
 
+def _make_skill_with_metaskill(
+    parent: Path, name: str, description: str = "A test metaskill."
+):
+    """Create a skill with a SKILL.star so discover_skills sets metaskill_path."""
+    skill_dir = _make_skill(parent, name, description)
+    (skill_dir / "SKILL.star").write_text(
+        'def run(input):\n    return "ok"', encoding="utf-8"
+    )
+    return skill_dir
+
+
 # =========================================================================
 # Frontmatter parsing
 # =========================================================================
@@ -945,6 +956,80 @@ class TestFormatCatalog:
         text = format_skill_catalog(catalog)
         assert f"(file: {tmp_path}/SKILL.md)" in text
 
+    def test_metaskill_tag_suppressed_when_disabled(self, tmp_path):
+        """metaskill_names=[] should suppress (metaskill: ...) tag."""
+        catalog = {
+            "ms": SkillInfo(
+                name="ms",
+                description="A metaskill.",
+                path=tmp_path,
+                is_local=True,
+                metaskill_path=tmp_path / "SKILL.star",
+            )
+        }
+        text = format_skill_catalog(catalog, metaskill_names=[])
+        assert "(metaskill:" not in text
+        assert "ms: A metaskill." in text
+
+    def test_metaskill_tag_shown_when_enabled(self, tmp_path):
+        catalog = {
+            "ms": SkillInfo(
+                name="ms",
+                description="A metaskill.",
+                path=tmp_path,
+                is_local=True,
+                metaskill_path=tmp_path / "SKILL.star",
+            )
+        }
+        text = format_skill_catalog(catalog, metaskill_names=["ms"])
+        assert "(metaskill: starlark)" in text
+        assert "### Metaskills" in text
+
+    def test_metaskill_section_absent_when_empty_list(self, tmp_path):
+        """Explicitly empty list (policy filtered) should suppress metaskill section."""
+        catalog = {
+            "ms": SkillInfo(
+                name="ms",
+                description="A metaskill.",
+                path=tmp_path,
+                is_local=True,
+                metaskill_path=tmp_path / "SKILL.star",
+            )
+        }
+        text = format_skill_catalog(catalog, metaskill_names=[])
+        assert "### Metaskills" not in text
+
+    def test_none_infers_from_catalog(self, tmp_path):
+        """metaskill_names=None should infer from catalog (backward compat)."""
+        catalog = {
+            "ms": SkillInfo(
+                name="ms",
+                description="A metaskill.",
+                path=tmp_path,
+                is_local=True,
+                metaskill_path=tmp_path / "SKILL.star",
+            )
+        }
+        text = format_skill_catalog(catalog, metaskill_names=None)
+        assert "(metaskill: starlark)" in text
+        assert "### Metaskills" in text
+
+    def test_local_only_catalog_omits_non_local_bullet(self, tmp_path):
+        """All-local catalog should not mention 'outside the project directory'."""
+        catalog = {
+            "a": SkillInfo(name="a", description="A.", path=tmp_path, is_local=True)
+        }
+        text = format_skill_catalog(catalog)
+        assert "outside the project directory" not in text
+
+    def test_non_local_only_catalog_omits_local_bullet(self, tmp_path):
+        """All-non-local catalog should not mention 'read the SKILL.md file directly'."""
+        catalog = {
+            "a": SkillInfo(name="a", description="A.", path=tmp_path, is_local=False)
+        }
+        text = format_skill_catalog(catalog)
+        assert "SKILL.md file directly" not in text
+
 
 # =========================================================================
 # Integration: catalog in system prompt, --no-skills
@@ -1055,6 +1140,138 @@ class TestIntegration:
         # Enum should still list all names
         enum = skill_tool["function"]["parameters"]["properties"]["name"]["enum"]
         assert len(enum) == 30
+
+
+# =========================================================================
+# Metaskill gating: activate_skill, build_system_prompt, inject_skill_mentions
+# =========================================================================
+
+
+class TestMetaskillGating:
+    def test_activate_skill_no_metaskill_warning_when_disabled(self, tmp_path):
+        """activate_skill should NOT emit 'call run_metaskill' when enabled_metaskills is empty."""
+        skills_dir = tmp_path / ".swival" / "skills"
+        _make_skill_with_metaskill(skills_dir, "ms")
+        catalog = discover_skills(str(tmp_path))
+        result = activate_skill("ms", catalog, [], enabled_metaskills=set())
+        assert "run_metaskill" not in result
+        assert "[Skill: ms activated]" in result
+
+    def test_activate_skill_metaskill_warning_when_enabled(self, tmp_path):
+        skills_dir = tmp_path / ".swival" / "skills"
+        _make_skill_with_metaskill(skills_dir, "ms")
+        catalog = discover_skills(str(tmp_path))
+        result = activate_skill("ms", catalog, [], enabled_metaskills={"ms"})
+        assert "run_metaskill" in result
+
+    def test_activate_skill_external_metaskill_no_warning_under_local_policy(
+        self, tmp_path
+    ):
+        """External metaskill should NOT get run_metaskill warning when only local metaskills are enabled."""
+        local_dir = tmp_path / ".swival" / "skills"
+        _make_skill_with_metaskill(local_dir, "local-ms")
+        ext_dir = tmp_path / "ext"
+        _make_skill_with_metaskill(ext_dir, "ext-ms")
+        local_catalog = discover_skills(str(tmp_path))
+        ext_skill = SkillInfo(
+            name="ext-ms",
+            description="External metaskill.",
+            path=ext_dir / "ext-ms",
+            is_local=False,
+            metaskill_path=ext_dir / "ext-ms" / "SKILL.star",
+        )
+        catalog = {**local_catalog, "ext-ms": ext_skill}
+        # Only local-ms is in the enabled set (simulates local policy)
+        enabled = {"local-ms"}
+        result_local = activate_skill(
+            "local-ms", catalog, [], enabled_metaskills=enabled
+        )
+        assert "run_metaskill" in result_local
+        result_ext = activate_skill("ext-ms", catalog, [], enabled_metaskills=enabled)
+        assert "run_metaskill" not in result_ext
+
+    def test_build_system_prompt_metaskill_section_when_names_provided(self, tmp_path):
+        """build_system_prompt forwards metaskill_names to format_skill_catalog."""
+        from swival.agent import build_system_prompt
+
+        catalog = {
+            "ms": SkillInfo(
+                name="ms",
+                description="A metaskill.",
+                path=tmp_path,
+                is_local=True,
+                metaskill_path=tmp_path / "SKILL.star",
+            )
+        }
+        prompt, _ = build_system_prompt(
+            base_dir=str(tmp_path),
+            system_prompt=None,
+            no_system_prompt=False,
+            no_instructions=True,
+            no_memory=True,
+            skills_catalog=catalog,
+            verbose=False,
+            metaskill_names=["ms"],
+        )
+        assert "### Metaskills" in prompt
+        assert "(metaskill: starlark)" in prompt
+
+    def test_build_system_prompt_no_metaskill_section_when_empty_names(self, tmp_path):
+        """build_system_prompt with metaskill_names=[] suppresses metaskill content."""
+        from swival.agent import build_system_prompt
+
+        catalog = {
+            "ms": SkillInfo(
+                name="ms",
+                description="A metaskill.",
+                path=tmp_path,
+                is_local=True,
+                metaskill_path=tmp_path / "SKILL.star",
+            )
+        }
+        prompt, _ = build_system_prompt(
+            base_dir=str(tmp_path),
+            system_prompt=None,
+            no_system_prompt=False,
+            no_instructions=True,
+            no_memory=True,
+            skills_catalog=catalog,
+            verbose=False,
+            metaskill_names=[],
+        )
+        assert "### Metaskills" not in prompt
+        assert "(metaskill:" not in prompt
+        assert "ms: A metaskill." in prompt
+
+    def test_inject_skill_mentions_no_metaskill_warning_when_disabled(self, tmp_path):
+        """$skill-name auto-activation should NOT emit 'run_metaskill' when disabled."""
+        skills_dir = tmp_path / ".swival" / "skills"
+        _make_skill_with_metaskill(skills_dir, "deploy")
+        catalog = discover_skills(str(tmp_path))
+        activations = inject_skill_mentions(
+            "Please $deploy the app",
+            catalog,
+            [],
+            enabled_metaskills=set(),
+        )
+        assert len(activations) == 1
+        name, result = activations[0]
+        assert name == "deploy"
+        assert "run_metaskill" not in result
+
+    def test_inject_skill_mentions_metaskill_warning_when_enabled(self, tmp_path):
+        skills_dir = tmp_path / ".swival" / "skills"
+        _make_skill_with_metaskill(skills_dir, "deploy")
+        catalog = discover_skills(str(tmp_path))
+        activations = inject_skill_mentions(
+            "Please $deploy the app",
+            catalog,
+            [],
+            enabled_metaskills={"deploy"},
+        )
+        assert len(activations) == 1
+        _, result = activations[0]
+        assert "run_metaskill" in result
 
 
 # =========================================================================

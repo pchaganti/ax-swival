@@ -414,7 +414,7 @@ def run_metaskill(
     if not input_data:
         from .skills import activate_skill
 
-        hint = activate_skill(name, skills_catalog, [])
+        hint = activate_skill(name, skills_catalog, [], enabled_metaskills={name})
         return (
             f"error: input is required. The metaskill needs specific keys in the "
             f"input object. Here are the skill instructions:\n\n{hint}\n\n"

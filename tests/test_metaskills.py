@@ -162,7 +162,7 @@ class TestCatalog:
         _make_metaskill(skills_dir, "my-ms", 'def run(input):\n    return "ok"')
         _make_skill(skills_dir, "static-skill", "A static skill.")
         catalog = discover_skills(str(tmp_path))
-        text = format_skill_catalog(catalog)
+        text = format_skill_catalog(catalog, metaskill_names=["my-ms"])
         assert "(metaskill: starlark)" in text
         assert "static-skill" in text
 

@@ -428,10 +428,13 @@ def activate_skill(
     name: str,
     catalog: dict[str, SkillInfo],
     read_roots: list[Path],
+    enabled_metaskills: set[str] | None = None,
 ) -> str:
     """Load a skill's full instructions and update the read allowlist.
 
     Returns the formatted skill instructions or an error string.
+    The metaskill warning is only emitted when the skill's name is in
+    *enabled_metaskills*.
     """
     skill = catalog.get(name)
     if skill is None:
@@ -470,7 +473,7 @@ def activate_skill(
         parts.append(f"\n[truncated at {MAX_SKILL_BODY_CHARS} characters]")
     parts.append("</skill-instructions>")
     parts.append("")
-    if skill.metaskill_path:
+    if enabled_metaskills and name in enabled_metaskills and skill.metaskill_path:
         parts.append(
             f"IMPORTANT: This is an executable metaskill. Do NOT follow the instructions "
             f"above manually. Instead, call the `run_metaskill` tool with "
@@ -500,10 +503,27 @@ def activate_skill(
     return "\n".join(parts)
 
 
-def format_skill_catalog(catalog: dict[str, SkillInfo]) -> str:
-    """Format the skill catalog for inclusion in the system prompt."""
+def format_skill_catalog(
+    catalog: dict[str, SkillInfo],
+    metaskill_names: list[str] | None = None,
+) -> str:
+    """Format the skill catalog for inclusion in the system prompt.
+
+    ``metaskill_names`` controls which skills get the ``(metaskill: …)`` tag
+    and whether the ``### Metaskills`` section is emitted:
+    - ``None`` — infer from catalog (backward compat for direct callers).
+    - A list (including ``[]``) — use exactly that list.
+    """
     if not catalog:
         return ""
+
+    if metaskill_names is None:
+        enabled_metaskills = {s.name for s in catalog.values() if s.metaskill_path}
+    else:
+        enabled_metaskills = set(metaskill_names)
+
+    has_local = any(s.is_local for s in catalog.values())
+    has_non_local = any(not s.is_local for s in catalog.values())
 
     lines = [
         "## Skills",
@@ -514,7 +534,7 @@ def format_skill_catalog(catalog: dict[str, SkillInfo]) -> str:
     for name in sorted(catalog):
         skill = catalog[name]
         meta_tag = ""
-        if skill.metaskill_path:
+        if name in enabled_metaskills and skill.metaskill_path:
             meta_tag = f" (metaskill: {skill.metaskill_language})"
         if skill.is_local:
             path_str = str(skill.path / "SKILL.md")
@@ -523,18 +543,29 @@ def format_skill_catalog(catalog: dict[str, SkillInfo]) -> str:
             lines.append(f"- {name}: {skill.description}{meta_tag}")
     lines.append("")
     lines.append("### How to use skills")
-    has_metaskills = any(s.metaskill_path for s in catalog.values())
-    lines.append(
+    bullets = [
         "- Call the `use_skill` tool with the skill name to activate it and receive "
-        "detailed instructions.\n"
-        "- For local skills (those showing a file path above), you may also read the "
-        "SKILL.md file directly.\n"
-        "- For skills without a path shown, `use_skill` is the only way to access them — "
-        "do not search for their files, they are outside the project directory.\n"
-        "- If the user mentions a skill with `$skill-name`, it is activated automatically.\n"
-        "- If multiple skills apply, activate the minimal set that covers the request."
+        "detailed instructions."
+    ]
+    if has_local:
+        bullets.append(
+            "- For local skills (those showing a file path above), you may also read the "
+            "SKILL.md file directly."
+        )
+    if has_non_local:
+        bullets.append(
+            "- For skills without a path shown, `use_skill` is the only way to access "
+            "them — do not search for their files, they are outside the project directory."
+        )
+    bullets.append(
+        "- If the user mentions a skill with `$skill-name`, it is activated automatically."
     )
-    if has_metaskills:
+    if len(catalog) > 1 and enabled_metaskills:
+        bullets.append(
+            "- If multiple skills apply, activate the minimal set that covers the request."
+        )
+    lines.append("\n".join(bullets))
+    if enabled_metaskills:
         lines.append(
             "\n### Metaskills\n"
             "Skills marked `(metaskill: starlark)` have an executable workflow program. "
@@ -633,6 +664,7 @@ def inject_skill_mentions(
     text: str,
     catalog: dict[str, SkillInfo],
     read_roots: list[Path],
+    enabled_metaskills: set[str] | None = None,
 ) -> list[tuple[str, str]]:
     """Extract $skill mentions from text and activate each skill.
 
@@ -645,7 +677,9 @@ def inject_skill_mentions(
 
     results: list[tuple[str, str]] = []
     for name in names:
-        result = activate_skill(name, catalog, read_roots)
+        result = activate_skill(
+            name, catalog, read_roots, enabled_metaskills=enabled_metaskills
+        )
         results.append((name, result))
 
     return results
