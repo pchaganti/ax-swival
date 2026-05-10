@@ -399,7 +399,7 @@ class TestTodoList:
         ]
         out = _capture(fmt.todo_list, items)
         assert "[todo]" in out
-        assert "2 remaining" in out
+        assert "1/3" in out
         assert "\u2611" in out  # done checkbox
         assert "\u2610" in out  # pending checkbox
         assert "Read the codebase" in out
@@ -428,16 +428,16 @@ class TestTodoList:
         items = [TodoItem("Existing task")]
         out = _capture(fmt.todo_list, items, note="Already listed: Existing task")
         assert "Already listed: Existing task" in out
-        assert "1 remaining" in out
+        assert "0/1" in out
 
     def test_empty_list(self):
         out = _capture(fmt.todo_list, [])
         assert "[todo]" in out
-        assert "0 remaining" in out
+        assert "0/0" in out
 
     def test_clear_note(self):
         out = _capture(fmt.todo_list, [], note="3 items removed")
-        assert "0 remaining" in out
+        assert "0/0" in out
         assert "3 items removed" in out
 
 
@@ -534,3 +534,129 @@ class TestReplAnswer:
         output = buf.getvalue()
         assert "**bold text**" in output  # raw markers preserved for copy/paste
         assert "\x1b[" in output  # but with ANSI styling
+
+
+class TestReplSplash:
+    def test_no_output_on_non_tty(self):
+        buf = StringIO()
+        old = fmt._console
+        fmt._console = Console(file=buf, no_color=True, width=80)
+        try:
+            fmt.repl_splash(model="test-model", provider="generic", workspace="/tmp")
+        finally:
+            fmt._console = old
+        assert buf.getvalue() == ""
+
+    def test_renders_on_tty(self):
+        buf = StringIO()
+        old = fmt._console
+        fmt._console = _styled_console(buf)
+        try:
+            fmt.repl_splash(
+                model="qwen3-8b", provider="lmstudio", workspace="/tmp/proj"
+            )
+        finally:
+            fmt._console = old
+        output = buf.getvalue()
+        assert "qwen3-8b" in output
+        assert "lmstudio" in output
+
+
+class TestToolLineLifecycle:
+    def test_returns_none_on_non_tty(self):
+        buf = StringIO()
+        old = fmt._console
+        fmt._console = Console(file=buf, no_color=True, width=80)
+        try:
+            handle = fmt.tool_call("read_file", '{"path": "x.txt"}')
+        finally:
+            fmt._console = old
+        assert handle is None
+
+    def test_lifecycle_on_tty(self):
+        buf = StringIO()
+        old = fmt._console
+        fmt._console = _styled_console(buf)
+        try:
+            handle = fmt.tool_call("read_file", '{"path": "x.txt"}')
+            assert handle is not None
+            handle.finish(True, "0.1s", 0.1)
+        finally:
+            fmt._console = old
+        output = buf.getvalue()
+        assert "read_file" in output
+
+    def test_error_finish_on_tty(self):
+        buf = StringIO()
+        old = fmt._console
+        fmt._console = _styled_console(buf)
+        try:
+            handle = fmt.tool_call("write_file", "")
+            assert handle is not None
+            handle.finish(False, "permission denied", 0)
+        finally:
+            fmt._console = old
+        output = buf.getvalue()
+        assert "write_file" in output
+
+
+class TestErrorPanel:
+    def test_panel_on_tty(self):
+        buf = StringIO()
+        old = fmt._console
+        fmt._console = _styled_console(buf)
+        try:
+            fmt.error("connection refused")
+        finally:
+            fmt._console = old
+        output = buf.getvalue()
+        assert "connection refused" in output
+        assert "Error" in output
+
+    def test_plain_on_non_tty(self):
+        out = _capture(fmt.error, "connection refused")
+        assert "Error:" in out
+        assert "connection refused" in out
+
+
+class TestCompletionElapsed:
+    def test_with_elapsed(self):
+        out = _capture(fmt.completion, 5, "ok", elapsed=12.3)
+        assert "Agent finished" in out
+        assert "5 turns" in out
+        assert "12.3s" in out
+
+    def test_without_elapsed(self):
+        out = _capture(fmt.completion, 5, "ok")
+        assert "Agent finished" in out
+        assert "5 turns" in out
+
+    def test_max_turns_with_elapsed(self):
+        out = _capture(fmt.completion, 3, "max_turns", elapsed=5.7)
+        assert "3 turns" in out
+        assert "5.7s" in out
+        assert "max_turns" in out
+
+
+class TestTodoProgressBar:
+    def test_progress_bar_renders(self):
+        items = [
+            TodoItem("A", done=True),
+            TodoItem("B", done=True),
+            TodoItem("C"),
+        ]
+        out = _capture(fmt.todo_list, items)
+        assert "2/3" in out
+        assert "\u2588" in out  # filled block
+        assert "\u2591" in out  # empty block
+        assert "66%" in out
+
+    def test_all_done(self):
+        items = [
+            TodoItem("A", done=True),
+            TodoItem("B", done=True),
+        ]
+        out = _capture(fmt.todo_list, items)
+        assert "2/2" in out
+        assert "100%" in out
+        assert "done!" in out

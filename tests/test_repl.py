@@ -402,7 +402,7 @@ class TestReplLoop:
             repl_loop([], [], **_loop_kwargs(tmp_path))
         _, kwargs = mock_cls.call_args
         assert "key_bindings" in kwargs
-        assert kwargs["prompt_continuation"] == "    ... "
+        assert kwargs["prompt_continuation"] == "  \u2506 "
         assert kwargs.get("multiline", False) is not True
 
     def test_exit_command(self, tmp_path):

@@ -10,6 +10,7 @@ from rich.console import Console
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.markup import escape
+from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.rule import Rule
 from rich.spinner import Spinner
@@ -50,11 +51,44 @@ def init(*, color: bool = False, no_color: bool = False) -> None:
 # -- Turn structure ----------------------------------------------------------
 
 
+_TURN_GRADIENT = [
+    (0, 180, 220),  # cyan
+    (60, 120, 220),  # blue
+    (160, 80, 200),  # magenta
+]
+
+
+class _GradientRule:
+    """A horizontal rule with a gradient color ramp and centered title."""
+
+    def __init__(self, title: str):
+        self.title = title
+
+    def __rich_console__(self, console, options):
+        width = options.max_width
+        title = f" {self.title} "
+        side = max((width - len(title)) // 2, 0)
+        text = Text()
+        for i in range(side):
+            t = i / max(width - 1, 1)
+            r, g, b = _lerp_color(_TURN_GRADIENT, t)
+            text.append("\u2500", style=Style(color=f"rgb({r},{g},{b})"))
+        text.append(title, style=Style(bold=True, color="white"))
+        for i in range(side + len(title), width):
+            t = i / max(width - 1, 1)
+            r, g, b = _lerp_color(_TURN_GRADIENT, t)
+            text.append("\u2500", style=Style(color=f"rgb({r},{g},{b})"))
+        yield from text.__rich_console__(console, options)
+
+
 def turn_header(n: int, max_n: int, token_est: int) -> None:
     reset_state()
     _console.print()
     title = f"Turn {n}/{max_n} (~{token_est} tokens)"
-    _console.print(Rule(title, style="cyan"))
+    if _console.is_terminal:
+        _console.print(_GradientRule(title))
+    else:
+        _console.print(Rule(title, style="cyan"))
 
 
 def llm_timing(elapsed: float, finish_reason: str) -> None:
@@ -67,12 +101,13 @@ def llm_timing(elapsed: float, finish_reason: str) -> None:
 
 _SPINNER_PHASES: list[tuple[float, str, str, str]] = [
     # (min_seconds, spinner_name, style, verb)
-    (0, "dots", "cyan", "Thinking"),
-    (3, "dots2", "cyan", "Reasoning"),
-    (8, "dots3", "blue", "Composing"),
-    (15, "dots", "magenta", "Elaborating"),
-    (25, "dots2", "blue", "Refining"),
-    (40, "dots3", "cyan", "Polishing"),
+    (0, "dots", "bright_cyan", "Thinking"),
+    (2, "arc", "cyan", "Reasoning"),
+    (5, "bouncingBall", "bright_blue", "Analyzing"),
+    (10, "moon", "blue", "Composing"),
+    (18, "dots3", "bright_magenta", "Elaborating"),
+    (28, "earth", "magenta", "Synthesizing"),
+    (40, "clock", "bright_cyan", "Polishing"),
 ]
 
 
@@ -89,7 +124,7 @@ class _PhaseSpinner:
             initial_desc = label
         self.suffix = suffix
 
-        self._spinner_col = SpinnerColumn("dots", style="cyan", speed=1.5)
+        self._spinner_col = SpinnerColumn("dots", style="cyan", speed=2.0)
         self._progress = Progress(
             self._spinner_col,
             TextColumn("  {task.description}"),
@@ -123,7 +158,7 @@ class _PhaseSpinner:
                 if new_idx != phase_idx:
                     phase_idx = new_idx
                     _, name, style, verb = _SPINNER_PHASES[phase_idx]
-                    spinner_col.spinner = Spinner(name, style=style, speed=1.5)
+                    spinner_col.spinner = Spinner(name, style=style, speed=2.0)
                     progress.update(task_id, description=f"{verb}{suffix}")
 
         self._thread = threading.Thread(target=_cycle, args=(tid,), daemon=True)
@@ -152,21 +187,61 @@ def llm_spinner(label: str = "Thinking"):
         spinner.stop()
 
 
-def completion(turns: int, exit_code: str) -> None:
+def completion(turns: int, exit_code: str, elapsed: float | None = None) -> None:
+    timing = f" ({elapsed:.1f}s)" if elapsed is not None else ""
     if exit_code == "ok":
         _console.print(
-            Text(f"  \u2713 Agent finished: {turns} turns", style="bold green")
+            Text(f"  \u2713 Agent finished: {turns} turns{timing}", style="bold green")
         )
     else:
         _console.print(
-            Text(f"  Agent finished: {turns} turns, exit={exit_code}", style="bold red")
+            Text(
+                f"  Agent finished: {turns} turns{timing}, exit={exit_code}",
+                style="bold red",
+            )
         )
 
 
 # -- Tool calls --------------------------------------------------------------
 
 
-def tool_call(name: str, args_json: str) -> None:
+class _ToolLine:
+    """Live spinner for an in-progress tool call on TTY."""
+
+    def __init__(self, name: str):
+        self._name = name
+        self._live = Live(
+            self._render_spinning(name),
+            console=_console,
+            transient=True,
+            refresh_per_second=12,
+        )
+        self._live.start()
+
+    @staticmethod
+    def _render_spinning(name: str) -> Text:
+        text = Text()
+        text.append("  \u25b6 ", style="bold magenta")
+        text.append(name, style="bold magenta")
+        text.append("  \u2026", style="dim")
+        return text
+
+    def finish(self, success: bool, detail: str, elapsed: float) -> None:
+        self._live.stop()
+        header = Text()
+        if success:
+            header.append(f"  \u2713 {self._name}", style="green")
+            header.append(f"  {elapsed:.1f}s", style="green")
+        else:
+            header.append(f"  \u2717 {self._name}", style="bold red")
+            header.append(f"  {detail}", style="red")
+        _console.print(header)
+
+
+def tool_call(name: str, args_json: str) -> "_ToolLine | None":
+    """Print tool invocation; returns a live handle on TTY."""
+    if _console.is_terminal:
+        return _ToolLine(name)
     header = Text()
     header.append("  \u25b6 ", style="bold magenta")
     header.append(name, style="bold magenta")
@@ -174,9 +249,20 @@ def tool_call(name: str, args_json: str) -> None:
     if args_json:
         for line in args_json.splitlines():
             _console.print(Text(f"    {line}", style="dim"))
+    return None
 
 
-def tool_result(name: str, elapsed: float, preview: str) -> None:
+def tool_result(
+    name: str,
+    elapsed: float,
+    preview: str,
+    handle: "_ToolLine | None" = None,
+) -> None:
+    if handle:
+        handle.finish(True, f"{elapsed:.1f}s", elapsed)
+        if preview:
+            _console.print(Text(f"    {preview}", style="dim"))
+        return
     header = Text()
     header.append(f"  \u2713 {name}", style="green")
     header.append(f"  {elapsed:.1f}s", style="green")
@@ -191,7 +277,7 @@ _DIFF_MAX_BYTES = 4096
 
 def tool_diff(file_path: str, old: str, new: str) -> None:
     """Print a colored unified diff of an edit to stderr."""
-    lines = list(
+    diff_lines = list(
         difflib.unified_diff(
             old.splitlines(keepends=True),
             new.splitlines(keepends=True),
@@ -199,16 +285,23 @@ def tool_diff(file_path: str, old: str, new: str) -> None:
             tofile=file_path,
         )
     )
-    if not lines:
+    if not diff_lines:
         return
+
+    additions = sum(
+        1 for dl in diff_lines if dl.startswith("+") and not dl.startswith("+++")
+    )
+    deletions = sum(
+        1 for dl in diff_lines if dl.startswith("-") and not dl.startswith("---")
+    )
 
     output = Text()
     total_bytes = 0
     shown = 0
-    for line in lines:
+    for line in diff_lines:
         if shown >= _DIFF_MAX_LINES or total_bytes >= _DIFF_MAX_BYTES:
-            remaining = len(lines) - shown
-            output.append(f"    ... {remaining} more lines\n", style="dim")
+            remaining = len(diff_lines) - shown
+            output.append(f"... {remaining} more lines\n", style="dim")
             break
         if line.startswith("---") or line.startswith("+++"):
             style = "bold"
@@ -225,17 +318,40 @@ def tool_diff(file_path: str, old: str, new: str) -> None:
         if len(encoded) > budget:
             encoded = encoded[:budget]
             line = encoded.decode("utf-8", errors="ignore")
-        display = f"    {line}"
+        display = line if _console.is_terminal else f"    {line}"
         output.append(display, style=style)
         if not display.endswith("\n"):
             output.append("\n")
         total_bytes += len(encoded)
         shown += 1
 
-    _console.print(output, end="")
+    if _console.is_terminal:
+        subtitle = Text()
+        subtitle.append(f"+{additions}", style="green")
+        subtitle.append(" / ", style="dim")
+        subtitle.append(f"-{deletions}", style="red")
+        panel = Panel(
+            output,
+            title=file_path,
+            title_align="left",
+            subtitle=subtitle,
+            subtitle_align="right",
+            border_style="dim",
+            padding=(0, 1),
+        )
+        _console.print(panel)
+    else:
+        _console.print(output, end="")
 
 
-def tool_error(name: str, msg: str) -> None:
+def tool_error(
+    name: str,
+    msg: str,
+    handle: "_ToolLine | None" = None,
+) -> None:
+    if handle:
+        handle.finish(False, msg, 0)
+        return
     header = Text()
     header.append(f"  \u2717 {name}", style="bold red")
     header.append(f"  {msg}", style="red")
@@ -263,6 +379,9 @@ def guardrail(tool_name: str, count: int, error: str) -> None:
 # -- Think steps -------------------------------------------------------------
 
 
+_BRANCH_COLORS = ["cyan", "blue", "magenta"]
+
+
 def think_step(
     number: int,
     total: int,
@@ -284,11 +403,12 @@ def think_step(
         line.append("  \u2502  \u2514\u2500 ", style="yellow")
         line.append(f"rev: {text}", style="dim italic")
     elif branch_id is not None and branch_from_thought is not None:
-        line.append("  \u251c\u2500 ", style="yellow")
-        line.append(f"[branch:{branch_id}] ", style="yellow")
+        color = _BRANCH_COLORS[hash(branch_id) % len(_BRANCH_COLORS)]
+        line.append(f"  \u251c\u2500 {_think_count}. ", style=color)
+        line.append(f"[branch:{branch_id}] ", style=color)
         line.append(text, style="dim italic")
     else:
-        line.append("  \u251c\u2500 ", style="yellow")
+        line.append(f"  \u251c\u2500 {_think_count}. ", style="yellow")
         line.append(text, style="dim italic")
     _console.print(line)
 
@@ -305,6 +425,15 @@ def todo_update(action: str, detail: str) -> None:
     _console.print(line)
 
 
+_PROGRESS_STOPS = [(220, 50, 50), (220, 180, 50), (50, 220, 50)]
+
+
+def _progress_bar_color(ratio: float) -> str:
+    """Return an RGB color interpolated from red (0%) to yellow (50%) to green (100%)."""
+    r, g, b = _lerp_color(_PROGRESS_STOPS, ratio)
+    return f"rgb({r},{g},{b})"
+
+
 def todo_list(
     items: list,
     action: str | None = None,
@@ -312,10 +441,26 @@ def todo_list(
     note: str | None = None,
 ) -> None:
     """Render the full todo checklist with an optional action annotation."""
-    remaining = sum(1 for i in items if not i.done)
+    total = len(items)
+    done = sum(1 for i in items if i.done)
     header = Text()
     header.append("  [todo]", style="yellow")
-    header.append(f" {remaining} remaining", style="dim")
+    header.append(f" {done}/{total}", style="dim")
+
+    if total > 0:
+        ratio = done / total
+        bar_width = 10
+        filled = int(ratio * bar_width)
+        empty = bar_width - filled
+        color = _progress_bar_color(ratio)
+        header.append(" ", style="")
+        header.append("\u2588" * filled, style=color)
+        header.append("\u2591" * empty, style="dim")
+        pct = int(ratio * 100)
+        header.append(f" {pct}%", style="dim")
+        if done == total:
+            header.append(" done!", style="bold green")
+
     if note:
         header.append(f"  ({note})", style="dim italic")
     _console.print(header)
@@ -445,10 +590,21 @@ def warning(msg: str) -> None:
 
 
 def error(msg: str) -> None:
-    line = Text()
-    line.append("Error: ", style="bold red")
-    line.append(msg, style="red")
-    _console.print(line)
+    if _console.is_terminal:
+        _console.print(
+            Panel(
+                Text(msg, style="red"),
+                title="Error",
+                title_align="left",
+                border_style="bold red",
+                padding=(0, 1),
+            )
+        )
+    else:
+        line = Text()
+        line.append("Error: ", style="bold red")
+        line.append(msg, style="red")
+        _console.print(line)
 
 
 sandbox_hint = info
@@ -468,9 +624,123 @@ def repl_banner() -> None:
     _console.print(Text("Interactive mode. Type /exit or Ctrl-D to quit.", style="dim"))
 
 
+_LOGO = r"""
+ ███ █   █ █ █   █ ███ █
+ █   █   █ █ █   █ █ █ █
+ ███ █ █ █ █  █ █  ███ █
+   █ ██ ██ █  █ █  █ █ █
+ ███ █   █ █   █   █ █ ███
+""".strip("\n")
+
+_GRADIENT_STOPS = [
+    (0, 80, 220),  # cyan
+    (120, 60, 220),  # blue-purple
+    (200, 50, 200),  # magenta
+    (220, 160, 40),  # yellow
+]
+
+
+def _lerp_color(stops: list[tuple[int, int, int]], t: float) -> tuple[int, int, int]:
+    """Interpolate between color stops at position t in [0, 1]."""
+    t = max(0.0, min(1.0, t))
+    n = len(stops) - 1
+    idx = min(int(t * n), n - 1)
+    local_t = (t * n) - idx
+    r0, g0, b0 = stops[idx]
+    r1, g1, b1 = stops[idx + 1]
+    return (
+        int(r0 + (r1 - r0) * local_t),
+        int(g0 + (g1 - g0) * local_t),
+        int(b0 + (b1 - b0) * local_t),
+    )
+
+
+def repl_splash(
+    model: str = "",
+    provider: str = "",
+    workspace: str = "",
+) -> None:
+    """Print a colorful startup splash banner to stderr."""
+    if not _console.is_terminal:
+        return
+
+    logo_lines = _LOGO.split("\n")
+    max_len = max(len(ln) for ln in logo_lines)
+    text = Text()
+    for row_idx, row in enumerate(logo_lines):
+        padded = row.ljust(max_len)
+        for col_idx, ch in enumerate(padded):
+            t = col_idx / max(max_len - 1, 1)
+            r, g, b = _lerp_color(_GRADIENT_STOPS, t)
+            text.append(ch, style=Style(color=f"rgb({r},{g},{b})", bold=True))
+        text.append("\n")
+
+    _console.print()
+    _console.print(text, end="")
+
+    if model or provider or workspace:
+        info_line = Text()
+        if model:
+            info_line.append(f"  model: {model}", style="dim")
+        if provider:
+            if model:
+                info_line.append(" · ", style="dim")
+            info_line.append(f"provider: {provider}", style="dim")
+        if workspace:
+            if model or provider:
+                info_line.append(" · ", style="dim")
+            info_line.append(f"workspace: {workspace}", style="dim")
+        _console.print(info_line)
+
+    grad_rule = Text()
+    width = _console.width or 80
+    for i in range(width):
+        t = i / max(width - 1, 1)
+        r, g, b = _lerp_color(_GRADIENT_STOPS, t)
+        grad_rule.append("─", style=Style(color=f"rgb({r},{g},{b})"))
+    _console.print(grad_rule)
+
+
 def stderr_is_terminal() -> bool:
     """True when stderr is a TTY."""
     return _console.is_terminal
+
+
+class _BlinkingCursor:
+    """Renderable that appends a blinking block cursor to streamed text.
+
+    The blink is time-driven: __rich_console__ reads time.monotonic() and
+    toggles the cursor at ~2 Hz.  The Live refresh loop (12 fps) drives
+    updates — no threads or sleeps needed.
+    """
+
+    def __init__(self, text_lines: str, style: str = "dim"):
+        self._text = text_lines
+        self._style = style
+
+    def __rich_console__(self, console, options):
+        show_cursor = int(time.monotonic() * 2) % 2 == 0
+        display = self._text + ("\u258c" if show_cursor else " ")
+        yield from Text(display, style=self._style).__rich_console__(console, options)
+
+
+def _detect_code_fence(text: str) -> tuple[str | None, str | None]:
+    """If the text has an open code fence, return (lang, code_content)."""
+    lines = text.split("\n")
+    fence_start = None
+    lang = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("```") and fence_start is None:
+            lang = stripped[3:].strip() or None
+            fence_start = i
+        elif stripped == "```" and fence_start is not None:
+            fence_start = None
+            lang = None
+    if fence_start is not None:
+        code_content = "\n".join(lines[fence_start + 1 :])
+        return lang, code_content
+    return None, None
 
 
 class streaming_preview:
@@ -486,6 +756,7 @@ class streaming_preview:
         self._buf: list[str] = []
         self._spinner = _PhaseSpinner(label)
         self._live: Live | None = None
+        self._cached_renderable = None
         try:
             self._max_lines = os.get_terminal_size(2).lines - 2
         except OSError:
@@ -520,10 +791,34 @@ class streaming_preview:
         lines = text.split("\n")
         if len(lines) > self._max_lines:
             lines = lines[-self._max_lines :]
-        self._live.update(Text("\n".join(lines), style="dim"))
+        visible = "\n".join(lines)
+
+        if _console.is_terminal:
+            if "\n" in delta:
+                lang, code = _detect_code_fence(visible)
+                if lang and code:
+                    from rich.syntax import Syntax
+
+                    self._cached_renderable = Syntax(
+                        code,
+                        lang,
+                        theme="ansi_dark",
+                        background_color="default",
+                        word_wrap=True,
+                    )
+                else:
+                    self._cached_renderable = None
+            if self._cached_renderable is None:
+                renderable = _BlinkingCursor(visible)
+            else:
+                renderable = self._cached_renderable
+            self._live.update(renderable)
+        else:
+            self._live.update(Text(visible, style="dim"))
 
     def reset(self) -> None:
         self._buf.clear()
+        self._cached_renderable = None
         if self._live is not None:
             self._live.stop()
             self._live = None

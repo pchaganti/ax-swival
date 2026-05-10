@@ -2454,11 +2454,12 @@ def handle_tool_call(
         fmt.tool_repair(name, repairs)
 
     _skip_generic_log = name in ("think", "todo", "snapshot")
+    _tool_handle = None
     if not _skip_generic_log and verbose:
         pretty = json.dumps(parsed_args, indent=2)
         if len(pretty) > MAX_ARG_LOG:
             pretty = pretty[:MAX_ARG_LOG] + "\n... (truncated)"
-        fmt.tool_call(name, pretty)
+        _tool_handle = fmt.tool_call(name, pretty)
 
     t0 = time.monotonic()
     try:
@@ -2507,9 +2508,9 @@ def handle_tool_call(
     succeeded = not result.startswith("error:")
     if not _skip_generic_log and verbose:
         if not succeeded:
-            fmt.tool_error(name, result)
+            fmt.tool_error(name, result, handle=_tool_handle)
         else:
-            fmt.tool_result(name, elapsed, result[:500])
+            fmt.tool_result(name, elapsed, result[:500], handle=_tool_handle)
 
     # Append corrective feedback for structural repairs so the LLM sees
     # what it got wrong and what the correct syntax looks like.
@@ -7570,7 +7571,7 @@ def run_agent_loop(
                 goal_state.record_blocker(msg.content)
 
             if verbose:
-                fmt.completion(turns, "ok")
+                fmt.completion(turns, "ok", elapsed=time.monotonic() - loop_start)
                 _show_state_summaries(
                     thinking_state, todo_state, snapshot_state, goal_state
                 )
@@ -7770,7 +7771,7 @@ def run_agent_loop(
 
     # max_turns exhausted — extract last assistant text
     if verbose:
-        fmt.completion(turns, "max_turns")
+        fmt.completion(turns, "max_turns", elapsed=time.monotonic() - loop_start)
     last_text = None
     for m in reversed(messages):
         if _msg_role(m) == "assistant":
@@ -9410,7 +9411,10 @@ def repl_loop(
     prompt_style = Style.from_dict(
         {
             "": "ansicyan",
-            "prompt": "bold ansigreen",
+            "prompt.turn": "ansibrightblack",
+            "prompt.chevron": "bold ansibrightcyan",
+            "prompt.name": "bold ansiwhite",
+            "prompt.sep": "ansimagenta",
         }
     )
     completer = SwivalCompleter(skills_catalog=skills_catalog)
@@ -9427,11 +9431,16 @@ def repl_loop(
         completer=completer,
         complete_while_typing=False,
         key_bindings=kb,
-        prompt_continuation="    ... ",
+        prompt_continuation="  \u2506 ",
     )
-    prompt_text = FormattedText([("class:prompt", "swival> ")])
 
     fmt.reset_state()
+    _repl_turn = 0
+    fmt.repl_splash(
+        model=model_id or "",
+        provider=llm_kwargs.get("provider", "") if llm_kwargs else "",
+        workspace=base_dir or "",
+    )
     if verbose:
         fmt.repl_banner()
 
@@ -9512,6 +9521,15 @@ def repl_loop(
     try:
         while True:
             try:
+                _repl_turn += 1
+                prompt_text = FormattedText(
+                    [
+                        ("class:prompt.turn", f"[{_repl_turn}] "),
+                        ("class:prompt.chevron", "\u276f "),
+                        ("class:prompt.name", "swival "),
+                        ("class:prompt.sep", "\u25b8 "),
+                    ]
+                )
                 print(file=sys.stderr)  # blank line before prompt
                 line = session.prompt(prompt_text)
             except (EOFError, KeyboardInterrupt):
