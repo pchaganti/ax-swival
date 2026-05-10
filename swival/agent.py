@@ -2461,6 +2461,25 @@ def handle_tool_call(
             pretty = pretty[:MAX_ARG_LOG] + "\n... (truncated)"
         _tool_handle = fmt.tool_call(name, pretty)
 
+    _is_cmd_tool = name in ("run_command", "run_shell_command")
+    _stream_cb = None
+    if _is_cmd_tool and _tool_handle is not None:
+        _cmd_str = parsed_args.get("command", "")
+        if isinstance(_cmd_str, list):
+            _cmd_str = " ".join(_cmd_str)
+        _tool_handle.freeze(_cmd_str[:120])
+        _stream_lines = [0]
+
+        def _stream_cb(chunk: bytes):
+            text = chunk.decode("utf-8", errors="replace")
+            for line in text.splitlines(keepends=True):
+                if _stream_lines[0] < fmt._CMD_STREAM_MAX_LINES:
+                    fmt.cmd_stream_chunk(line)
+                    _stream_lines[0] += 1
+                elif _stream_lines[0] == fmt._CMD_STREAM_MAX_LINES:
+                    fmt.cmd_stream_chunk("[...]\n")
+                    _stream_lines[0] += 1
+
     t0 = time.monotonic()
     try:
         result = dispatch(
@@ -2496,6 +2515,7 @@ def handle_tool_call(
             metaskill_loop_kwargs=metaskill_loop_kwargs,
             cancel_flag=cancel_flag,
             enabled_metaskills=enabled_metaskills,
+            stream_callback=_stream_cb,
         )
     except McpShutdownError:
         result = "error: MCP server is shutting down"
@@ -2507,8 +2527,13 @@ def handle_tool_call(
 
     succeeded = not result.startswith("error:")
     if not _skip_generic_log and verbose:
+        if _is_cmd_tool and _stream_cb is not None:
+            fmt.cmd_stream_end()
         if not succeeded:
             fmt.tool_error(name, result, handle=_tool_handle)
+        elif _is_cmd_tool and _stream_cb is not None:
+            preview = result[:500] if "saved to" in result else ""
+            fmt.tool_result(name, elapsed, preview, handle=_tool_handle)
         else:
             fmt.tool_result(name, elapsed, result[:500], handle=_tool_handle)
 

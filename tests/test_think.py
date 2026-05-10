@@ -1198,10 +1198,14 @@ class TestAgentLogSkip:
         monkeypatch.setattr(
             fmt,
             "tool_result",
-            lambda name, elapsed, preview: calls.append(("tool_result", name)),
+            lambda name, elapsed, preview, handle=None: calls.append(
+                ("tool_result", name)
+            ),
         )
         monkeypatch.setattr(
-            fmt, "tool_error", lambda name, msg: calls.append(("tool_error", name))
+            fmt,
+            "tool_error",
+            lambda name, msg, handle=None: calls.append(("tool_error", name)),
         )
 
         thinking_state = ThinkingState(verbose=False)

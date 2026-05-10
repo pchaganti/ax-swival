@@ -351,7 +351,8 @@ class TestLogging:
         captured = capsys.readouterr()
         assert "[todo]" in captured.err
         assert "Fix the bug" in captured.err
-        assert "1 remaining" in captured.err
+        assert "0/1" in captured.err
+        assert "added 1 item" in captured.err
 
     def test_verbose_done_logs(self, capsys):
         self._reinit_console()
@@ -361,7 +362,8 @@ class TestLogging:
         state.process({"action": "done", "task": "Fix the bug"})
         captured = capsys.readouterr()
         assert "[todo]" in captured.err
-        assert "0 remaining" in captured.err
+        assert "1/1" in captured.err
+        assert "marked done 1 item" in captured.err
         assert "\u2611" in captured.err  # done checkbox
 
     def test_verbose_clear_logs(self, capsys):
@@ -384,7 +386,8 @@ class TestLogging:
         state.process({"action": "remove", "task": "A"})
         captured = capsys.readouterr()
         assert "[todo]" in captured.err
-        assert "1 remaining" in captured.err
+        assert "0/1" in captured.err
+        assert "removed 1 item" in captured.err
         # Removed item should not appear
         assert "\u2610" in captured.err  # pending checkbox for B
 
@@ -406,7 +409,7 @@ class TestLogging:
         captured = capsys.readouterr()
         assert "[todo]" in captured.err
         assert "0 items removed" in captured.err
-        assert "0 remaining" in captured.err
+        assert "0/0" in captured.err
 
     def test_quiet_no_stderr(self, capsys):
         self._reinit_console()

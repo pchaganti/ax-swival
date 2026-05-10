@@ -13,7 +13,7 @@ import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
-from typing import Literal
+from typing import Callable, Literal
 
 from .a2a_types import A2A_META_PREFIX
 
@@ -2443,7 +2443,11 @@ def _guard_a2a_output(
 
 
 def _capture_process(
-    proc: subprocess.Popen, timeout: int, base_dir: str, scratch_dir: str | None = None
+    proc: subprocess.Popen,
+    timeout: int,
+    base_dir: str,
+    scratch_dir: str | None = None,
+    stream_callback: Callable[[bytes], None] | None = None,
 ) -> str:
     """Capture output from a running subprocess with timeout enforcement."""
     output_chunks: list[bytes] = []
@@ -2457,6 +2461,8 @@ def _capture_process(
                 chunk = proc.stdout.read(4096)
                 if not chunk:
                     break
+                if stream_callback is not None:
+                    stream_callback(chunk)
                 if output_truncated:
                     continue  # keep draining to prevent pipe backpressure
                 remaining = MAX_FILE_OUTPUT - output_total
@@ -2549,7 +2555,11 @@ def _is_root_path(p: str) -> bool:
 
 
 def _run_shell_command(
-    command: str, base_dir: str, timeout: int, scratch_dir: str | None = None
+    command: str,
+    base_dir: str,
+    timeout: int,
+    scratch_dir: str | None = None,
+    stream_callback: Callable[[bytes], None] | None = None,
 ) -> str:
     """Execute a shell string via sh -c (Unix) or cmd.exe /c (Windows)."""
     base_path = Path(base_dir)
@@ -2582,7 +2592,13 @@ def _run_shell_command(
     except OSError as e:
         return f"error: failed to start shell command: {e}"
 
-    return _capture_process(proc, timeout, base_dir, scratch_dir=scratch_dir)
+    return _capture_process(
+        proc,
+        timeout,
+        base_dir,
+        scratch_dir=scratch_dir,
+        stream_callback=stream_callback,
+    )
 
 
 ExecutionMode = Literal["argv", "shell"]
@@ -2684,6 +2700,7 @@ def _run_argv_command(
     timeout: int = 30,
     unrestricted: bool = False,
     scratch_dir: str | None = None,
+    stream_callback: Callable[[bytes], None] | None = None,
 ) -> str:
     """Execute an argv-form command and return its output."""
     if not command:
@@ -2746,7 +2763,13 @@ def _run_argv_command(
     except OSError as e:
         return f"error: failed to start command: {e}"
 
-    return _capture_process(proc, timeout, base_dir, scratch_dir=scratch_dir)
+    return _capture_process(
+        proc,
+        timeout,
+        base_dir,
+        scratch_dir=scratch_dir,
+        stream_callback=stream_callback,
+    )
 
 
 def _execute_normalized_command(
@@ -2757,11 +2780,16 @@ def _execute_normalized_command(
     timeout: int = 30,
     unrestricted: bool = False,
     scratch_dir: str | None = None,
+    stream_callback: Callable[[bytes], None] | None = None,
 ) -> str:
     """Execute a pre-normalized command call."""
     if normalized.mode == "shell":
         result = _run_shell_command(
-            normalized.command, base_dir, timeout, scratch_dir=scratch_dir
+            normalized.command,
+            base_dir,
+            timeout,
+            scratch_dir=scratch_dir,
+            stream_callback=stream_callback,
         )
     else:
         result = _run_argv_command(
@@ -2771,6 +2799,7 @@ def _execute_normalized_command(
             timeout=timeout,
             unrestricted=unrestricted,
             scratch_dir=scratch_dir,
+            stream_callback=stream_callback,
         )
 
     if normalized.repair_note:
@@ -3243,6 +3272,7 @@ def dispatch(name: str, args: dict, base_dir: str, **kwargs) -> str:
             timeout=args.get("timeout", 30),
             unrestricted=True if prefer_shell else unrestricted,
             scratch_dir=scratch_dir,
+            stream_callback=kwargs.get("stream_callback"),
         )
     elif name == "view_image":
         image_stash = kwargs.get("image_stash")

@@ -210,6 +210,7 @@ class _ToolLine:
 
     def __init__(self, name: str):
         self._name = name
+        self._stopped = False
         self._live = Live(
             self._render_spinning(name),
             console=_console,
@@ -226,8 +227,23 @@ class _ToolLine:
         text.append("  \u2026", style="dim")
         return text
 
-    def finish(self, success: bool, detail: str, elapsed: float) -> None:
+    def freeze(self, detail: str = "") -> None:
+        """Stop the spinner, print a static header. Use before streaming output."""
+        if self._stopped:
+            return
+        self._stopped = True
         self._live.stop()
+        header = Text()
+        header.append("  \u25b6 ", style="bold magenta")
+        header.append(self._name, style="bold magenta")
+        if detail:
+            header.append(f"  {detail}", style="dim")
+        _console.print(header)
+
+    def finish(self, success: bool, detail: str, elapsed: float) -> None:
+        if not self._stopped:
+            self._live.stop()
+            self._stopped = True
         header = Text()
         if success:
             header.append(f"  \u2713 {self._name}", style="green")
@@ -250,6 +266,25 @@ def tool_call(name: str, args_json: str) -> "_ToolLine | None":
         for line in args_json.splitlines():
             _console.print(Text(f"    {line}", style="dim"))
     return None
+
+
+_CMD_STREAM_MAX_LINES = 30
+_cmd_stream_needs_newline = False
+
+
+def cmd_stream_chunk(text: str) -> None:
+    """Print a chunk of live command output to stderr (dim, indented)."""
+    global _cmd_stream_needs_newline
+    _console.print(Text(f"    {text}", style="dim"), end="")
+    _cmd_stream_needs_newline = not text.endswith("\n")
+
+
+def cmd_stream_end() -> None:
+    """Ensure the stream ends on its own line before printing the footer."""
+    global _cmd_stream_needs_newline
+    if _cmd_stream_needs_newline:
+        _console.print()
+        _cmd_stream_needs_newline = False
 
 
 def tool_result(
