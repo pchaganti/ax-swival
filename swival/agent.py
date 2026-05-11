@@ -2468,17 +2468,11 @@ def handle_tool_call(
         if isinstance(_cmd_str, list):
             _cmd_str = " ".join(_cmd_str)
         _tool_handle.freeze(_cmd_str[:120])
-        _stream_lines = [0]
 
         def _stream_cb(chunk: bytes):
             text = chunk.decode("utf-8", errors="replace")
             for line in text.splitlines(keepends=True):
-                if _stream_lines[0] < fmt._CMD_STREAM_MAX_LINES:
-                    fmt.cmd_stream_chunk(line)
-                    _stream_lines[0] += 1
-                elif _stream_lines[0] == fmt._CMD_STREAM_MAX_LINES:
-                    fmt.cmd_stream_chunk("[...]\n")
-                    _stream_lines[0] += 1
+                fmt.cmd_stream_chunk(line)
 
     t0 = time.monotonic()
     try:
@@ -2526,12 +2520,13 @@ def handle_tool_call(
     elapsed = time.monotonic() - t0
 
     succeeded = not result.startswith("error:")
+    _did_stream = _stream_cb is not None
     if not _skip_generic_log and verbose:
-        if _is_cmd_tool and _stream_cb is not None:
+        if _did_stream:
             fmt.cmd_stream_end()
         if not succeeded:
             fmt.tool_error(name, result, handle=_tool_handle)
-        elif _is_cmd_tool and _stream_cb is not None:
+        elif _did_stream:
             preview = result[:500] if "saved to" in result else ""
             fmt.tool_result(name, elapsed, preview, handle=_tool_handle)
         else:

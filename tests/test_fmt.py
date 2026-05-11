@@ -600,6 +600,130 @@ class TestToolLineLifecycle:
         assert "write_file" in output
 
 
+class TestToolLineFreeze:
+    def test_freeze_stops_spinner_and_prints_header(self):
+        buf = StringIO()
+        old = fmt._console
+        fmt._console = _styled_console(buf)
+        try:
+            handle = fmt.tool_call("run_shell_command", "")
+            assert handle is not None
+            handle.freeze("make test")
+            handle.finish(True, "1.0s", 1.0)
+        finally:
+            fmt._console = old
+        output = buf.getvalue()
+        assert "run_shell_command" in output
+        assert "make test" in output
+        assert "\u2713" in output  # green checkmark from finish
+
+    def test_freeze_idempotent(self):
+        buf = StringIO()
+        old = fmt._console
+        fmt._console = _styled_console(buf)
+        try:
+            handle = fmt.tool_call("run_command", "")
+            assert handle is not None
+            handle.freeze("echo hi")
+            handle.freeze("echo hi")  # second call is a no-op
+            handle.finish(True, "0.5s", 0.5)
+        finally:
+            fmt._console = old
+        output = buf.getvalue()
+        # Only one static header printed despite two freeze calls
+        assert output.count("echo hi") == 1
+
+    def test_finish_after_freeze_shows_error(self):
+        buf = StringIO()
+        old = fmt._console
+        fmt._console = _styled_console(buf)
+        try:
+            handle = fmt.tool_call("run_shell_command", "")
+            assert handle is not None
+            handle.freeze("false")
+            handle.finish(False, "exit 1", 0)
+        finally:
+            fmt._console = old
+        output = buf.getvalue()
+        assert "\u2717" in output  # red X from error finish
+
+
+class TestCmdStream:
+    def test_stream_chunk_writes_indented(self):
+        buf = StringIO()
+        old = fmt._console
+        fmt._console = Console(file=buf, no_color=True, width=80)
+        fmt.reset_state()
+        try:
+            fmt.cmd_stream_chunk("hello world\n")
+        finally:
+            fmt.reset_state()
+            fmt._console = old
+        assert "    hello world" in buf.getvalue()
+
+    def test_stream_end_adds_newline_when_needed(self):
+        buf = StringIO()
+        old = fmt._console
+        fmt._console = Console(file=buf, no_color=True, width=80)
+        fmt.reset_state()
+        try:
+            fmt.cmd_stream_chunk("no trailing newline")
+            assert fmt._cmd_stream_needs_newline is True
+            fmt.cmd_stream_end()
+            assert fmt._cmd_stream_needs_newline is False
+        finally:
+            fmt.reset_state()
+            fmt._console = old
+        output = buf.getvalue()
+        assert output.endswith("\n")
+
+    def test_stream_end_noop_after_newline(self):
+        buf = StringIO()
+        old = fmt._console
+        fmt._console = Console(file=buf, no_color=True, width=80)
+        fmt.reset_state()
+        try:
+            fmt.cmd_stream_chunk("with newline\n")
+            assert fmt._cmd_stream_needs_newline is False
+            before = buf.getvalue()
+            fmt.cmd_stream_end()
+        finally:
+            fmt.reset_state()
+            fmt._console = old
+        assert buf.getvalue() == before  # nothing extra printed
+
+    def test_self_limits_after_max_lines(self):
+        buf = StringIO()
+        old = fmt._console
+        fmt._console = Console(file=buf, no_color=True, width=80)
+        fmt.reset_state()
+        try:
+            for i in range(fmt._CMD_STREAM_MAX_LINES + 10):
+                fmt.cmd_stream_chunk(f"line {i}\n")
+        finally:
+            fmt.reset_state()
+            fmt._console = old
+        output = buf.getvalue()
+        assert "[...]" in output
+        assert f"line {fmt._CMD_STREAM_MAX_LINES + 5}" not in output
+
+    def test_end_resets_line_counter(self):
+        buf = StringIO()
+        old = fmt._console
+        fmt._console = Console(file=buf, no_color=True, width=80)
+        fmt.reset_state()
+        try:
+            for i in range(fmt._CMD_STREAM_MAX_LINES + 5):
+                fmt.cmd_stream_chunk(f"line {i}\n")
+            fmt.cmd_stream_end()
+            assert fmt._cmd_stream_lines == 0
+            fmt.cmd_stream_chunk("after reset\n")
+        finally:
+            fmt.reset_state()
+            fmt._console = old
+        assert "after reset" in buf.getvalue()
+
+
 class TestErrorPanel:
     def test_panel_on_tty(self):
         buf = StringIO()

@@ -224,6 +224,34 @@ class TestCaptureProcessPreview:
         tail = result[preview_end:]
         assert "Exit code: 42" in tail
 
+    def test_stream_callback_receives_output(self, tmp_path):
+        from swival.tools import _capture_process
+
+        cmd = [sys.executable, "-c", "print('alpha'); print('beta')"]
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        chunks: list[bytes] = []
+        result = _capture_process(
+            proc, timeout=30, base_dir=str(tmp_path), stream_callback=chunks.append
+        )
+        assert "alpha" in result
+        assert "beta" in result
+        combined = b"".join(chunks).decode()
+        assert "alpha" in combined
+        assert "beta" in combined
+
+    def test_stream_callback_on_large_output(self, tmp_path):
+        from swival.tools import _capture_process
+
+        cmd = [sys.executable, "-c", "import sys; print('X' * 25_000); sys.exit(0)"]
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        chunks: list[bytes] = []
+        result = _capture_process(
+            proc, timeout=30, base_dir=str(tmp_path), stream_callback=chunks.append
+        )
+        assert "saved to" in result
+        streamed = b"".join(chunks).decode()
+        assert len(streamed) >= 25_000
+
 
 # ---------------------------------------------------------------------------
 # _guard_a2a_output integration — A2A metadata before preview

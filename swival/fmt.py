@@ -26,8 +26,10 @@ _think_count = 0
 
 def reset_state() -> None:
     """Reset all module-level rendering state (think tree counter, etc.)."""
-    global _think_count
+    global _think_count, _cmd_stream_lines, _cmd_stream_needs_newline
     _think_count = 0
+    _cmd_stream_lines = 0
+    _cmd_stream_needs_newline = False
 
 
 def init(*, color: bool = False, no_color: bool = False) -> None:
@@ -269,22 +271,36 @@ def tool_call(name: str, args_json: str) -> "_ToolLine | None":
 
 
 _CMD_STREAM_MAX_LINES = 30
+_cmd_stream_lines = 0
 _cmd_stream_needs_newline = False
 
 
 def cmd_stream_chunk(text: str) -> None:
-    """Print a chunk of live command output to stderr (dim, indented)."""
-    global _cmd_stream_needs_newline
+    """Print a chunk of live command output to stderr (dim, indented).
+
+    Automatically suppresses output after ``_CMD_STREAM_MAX_LINES`` lines,
+    emitting a single ``[...]`` marker at the cutoff.
+    """
+    global _cmd_stream_needs_newline, _cmd_stream_lines
+    if _cmd_stream_lines > _CMD_STREAM_MAX_LINES:
+        return
+    if _cmd_stream_lines == _CMD_STREAM_MAX_LINES:
+        _console.print(Text("    [...]", style="dim"))
+        _cmd_stream_lines += 1
+        _cmd_stream_needs_newline = False
+        return
     _console.print(Text(f"    {text}", style="dim"), end="")
     _cmd_stream_needs_newline = not text.endswith("\n")
+    _cmd_stream_lines += 1
 
 
 def cmd_stream_end() -> None:
-    """Ensure the stream ends on its own line before printing the footer."""
-    global _cmd_stream_needs_newline
+    """Ensure the stream ends on its own line and reset line counter."""
+    global _cmd_stream_needs_newline, _cmd_stream_lines
     if _cmd_stream_needs_newline:
         _console.print()
         _cmd_stream_needs_newline = False
+    _cmd_stream_lines = 0
 
 
 def tool_result(
